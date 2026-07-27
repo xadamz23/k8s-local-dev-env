@@ -176,9 +176,11 @@ git remote add origin https://github.com/you/k8s-lab.git && git push -u origin m
 Make the repo **private** — the `.gitignore` keeps the CA out, but a private
 repo is the right default here. Then register credentials:
 
+> NOTE: I could not get `argocd login` to work. So I just did a `k apply -f bootstrap/add-repo.yaml` to connect my github repo.
+
 ```bash
 kubectl -n argocd port-forward svc/argocd-server 8080:80 &
-argocd login localhost:8080 --username admin --password <from 7c> --insecure
+argocd login localhost:8080 --username admin --password <from 7c> --plaintext
 argocd repo add https://github.com/you/k8s-lab.git \
   --username you --password <fine-grained-PAT, Contents: read>
 ```
