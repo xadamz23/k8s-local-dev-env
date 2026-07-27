@@ -13,7 +13,7 @@ spec:
   source:
     repoURL: https://argoproj.github.io/argo-helm
     chart: argo-cd
-    targetRevision: "*"          # pin once green
+    targetRevision: "10.2.1"          # pin once green
     helm:
       values: |
         configs:
