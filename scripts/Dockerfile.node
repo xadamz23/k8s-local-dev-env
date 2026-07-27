@@ -1,0 +1,12 @@
+# kind node image with the Netskope root pre-trusted, so containerd can pull
+# images without hitting "x509: certificate signed by unknown authority".
+#
+#   ./scripts/extract-ca.sh
+#   docker build -f scripts/Dockerfile.node -t kindest-netskope:v1.36.1 scripts/
+#
+# Keep the tag in sync with the kind release you are using:
+#   kind version          # then check its default node image
+ARG NODE_VERSION=v1.36.1
+FROM kindest/node:${NODE_VERSION}
+COPY netskope.crt /usr/local/share/ca-certificates/netskope.crt
+RUN update-ca-certificates

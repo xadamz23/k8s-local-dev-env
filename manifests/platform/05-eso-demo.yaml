@@ -1,0 +1,37 @@
+# external-secrets needs a backend. The `fake` provider lets you prove the
+# controller/CRD wiring works before you stand up OpenBAO or point at AWS.
+#
+# API version note: ESO promoted these to external-secrets.io/v1. If your
+# chart version is older, change v1 -> v1beta1 here.
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: fake
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  provider:
+    fake:
+      data:
+        - key: "/dev/greeting"
+          value: "hello-from-eso"
+          version: "v1"
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: demo
+  namespace: default
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    name: fake
+    kind: ClusterSecretStore
+  target:
+    name: demo-secret
+  data:
+    - secretKey: greeting
+      remoteRef:
+        key: "/dev/greeting"

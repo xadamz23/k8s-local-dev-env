@@ -1,0 +1,55 @@
+# Values for the initial `helm install`. These MUST stay in sync with the
+# inline values in apps/argocd.yaml -- once Argo manages itself, that file
+# wins and any drift here gets reverted by selfHeal.
+
+configs:
+  params:
+    # Envoy terminates at the edge over plain HTTP; running argocd-server
+    # insecure avoids an infinite TLS redirect loop.
+    server.insecure: true
+  repositories:
+    # Envoy Gateway only publishes an OCI Helm chart.
+    envoy-gateway:
+      name: envoy-gateway
+      type: helm
+      url: docker.io/envoyproxy
+      enableOCI: "true"
+
+# --- Netskope TLS interception -------------------------------------------
+# Containers carry their own CA bundle from their base image, so trusting
+# Netskope on the node does NOT help repo-server clone git or fetch charts.
+# Mount a combined bundle (public roots + Netskope) over the system one.
+# Requires: kubectl -n argocd create configmap custom-ca-bundle \
+#             --from-file=ca-certificates.crt=scripts/nscacert_combined.pem
+repoServer:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+  volumes:
+    - name: custom-ca-bundle
+      configMap:
+        name: custom-ca-bundle
+  volumeMounts:
+    - name: custom-ca-bundle
+      mountPath: /etc/ssl/certs/ca-certificates.crt
+      subPath: ca-certificates.crt
+      readOnly: true
+
+applicationSet:
+  enabled: true
+  volumes:
+    - name: custom-ca-bundle
+      configMap:
+        name: custom-ca-bundle
+  volumeMounts:
+    - name: custom-ca-bundle
+      mountPath: /etc/ssl/certs/ca-certificates.crt
+      subPath: ca-certificates.crt
+      readOnly: true
+
+controller:
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+notifications:
+  enabled: false
+dex:
+  enabled: false

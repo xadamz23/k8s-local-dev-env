@@ -1,0 +1,51 @@
+# kind cluster tuned for a local platform stack on Colima / Apple Silicon.
+#
+#   kind create cluster --config kind-cluster.yaml
+#
+# Two things are going on here:
+#  1. extraPortMappings put host :80/:443 in front of fixed NodePorts, which is
+#     how you reach Envoy from your Mac browser (the Docker bridge is not
+#     routable from macOS -- see README).
+#  2. kubeadmConfigPatches make the control-plane components listen on 0.0.0.0
+#     so kube-prometheus-stack can actually scrape them. This is the payoff for
+#     choosing kind over k3d -- don't skip it.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: macos
+
+kubeadmConfigPatches:
+  - |
+    kind: KubeProxyConfiguration
+    metricsBindAddress: 0.0.0.0
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      # NOTE: this is the kubeadm v1beta4 list form (Kubernetes 1.31+).
+      # On an older node image you need the v1beta3 map form instead:
+      #   extraArgs:
+      #     bind-address: "0.0.0.0"
+      - |
+        kind: ClusterConfiguration
+        controllerManager:
+          extraArgs:
+            - name: bind-address
+              value: "0.0.0.0"
+        scheduler:
+          extraArgs:
+            - name: bind-address
+              value: "0.0.0.0"
+        etcd:
+          local:
+            extraArgs:
+              - name: listen-metrics-urls
+                value: "http://0.0.0.0:2381"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 443
+        protocol: TCP
+  - role: worker
+  - role: worker

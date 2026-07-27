@@ -1,0 +1,71 @@
+# Argo CD manages itself. After the first sync, upgrade by editing this file
+# rather than running helm. The values below MUST match
+# bootstrap/argocd-values.yaml or selfHeal will fight you.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: "*"          # pin once green
+    helm:
+      values: |
+        configs:
+          params:
+            server.insecure: true
+          repositories:
+            envoy-gateway:
+              name: envoy-gateway
+              type: helm
+              url: docker.io/envoyproxy
+              enableOCI: "true"
+
+        # Netskope CA -- see bootstrap/argocd-values.yaml for the why.
+        # The custom-ca-bundle configmap is created imperatively at bootstrap;
+        # it cannot live in git, because repo-server needs it to READ git.
+        repoServer:
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+          volumes:
+            - name: custom-ca-bundle
+              configMap:
+                name: custom-ca-bundle
+          volumeMounts:
+            - name: custom-ca-bundle
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              subPath: ca-certificates.crt
+              readOnly: true
+
+        applicationSet:
+          enabled: true
+          volumes:
+            - name: custom-ca-bundle
+              configMap:
+                name: custom-ca-bundle
+          volumeMounts:
+            - name: custom-ca-bundle
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              subPath: ca-certificates.crt
+              readOnly: true
+
+        controller:
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+        notifications:
+          enabled: false
+        dex:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

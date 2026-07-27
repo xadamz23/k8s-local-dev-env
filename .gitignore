@@ -1,0 +1,7 @@
+**/.DS_Store
+
+# Corporate CA material. Not secret, but it names your employer and
+# enumerates their security tooling -- keep it out of the repo.
+scripts/netskope.crt
+scripts/nscacert*.pem
+nscacert*.pem

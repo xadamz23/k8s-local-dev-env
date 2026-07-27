@@ -1,0 +1,27 @@
+# The app-of-apps. Apply this ONCE by hand after Argo CD is up:
+#   kubectl apply -f bootstrap/root-app.yaml
+# From then on, everything is git.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/xadamz23/k8s-local-dev-env.git   # <-- change me
+    targetRevision: main
+    path: apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

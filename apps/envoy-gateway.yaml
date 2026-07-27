@@ -1,0 +1,25 @@
+# Envoy Gateway ships as an OCI Helm chart. The repo is registered
+# declaratively in the Argo CD values (configs.repositories.envoy-gateway).
+# If this Application fails with an auth/OCI error, that registration is
+# the first thing to check.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: docker.io/envoyproxy
+    chart: gateway-helm
+    targetRevision: "*"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

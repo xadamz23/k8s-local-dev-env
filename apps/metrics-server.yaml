@@ -1,0 +1,48 @@
+# metrics-server implements the metrics.k8s.io API -- `kubectl top` and HPA.
+# kube-prometheus-stack does NOT provide this; the two are complementary.
+#
+# The --kubelet-insecure-tls flag is required on kind. kind does not enable
+# kubelet serving-certificate signing, so each kubelet presents a self-signed
+# cert that metrics-server cannot validate against the cluster CA. Without
+# the flag every scrape fails with "x509: cannot validate certificate".
+# See README for the stricter serverTLSBootstrap alternative.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/metrics-server/
+    chart: metrics-server
+    targetRevision: "*"          # pin once green
+    helm:
+      values: |
+        args:
+          - --kubelet-insecure-tls
+          # Default preference order can start with Hostname, which may not
+          # resolve from inside the cluster. InternalIP always works on kind.
+          - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+          - --metric-resolution=15s
+
+        resources:
+          requests: {cpu: 25m, memory: 64Mi}
+
+        # Prometheus can scrape metrics-server itself, but the ServiceMonitor
+        # CRD does not exist until kube-prometheus-stack syncs in wave 2.
+        # Enabling this at wave 0 would fail the sync and BLOCK every later
+        # wave. Flip both to true after the stack is green, then commit.
+        metrics:
+          enabled: false
+        serviceMonitor:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true
