@@ -18,7 +18,7 @@ spec:
   source:
     repoURL: https://kubernetes-sigs.github.io/metrics-server/
     chart: metrics-server
-    targetRevision: "*"          # pin once green
+    targetRevision: "3.13.1"          # pin once green
     helm:
       values: |
         args:
