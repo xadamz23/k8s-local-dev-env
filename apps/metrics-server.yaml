@@ -36,9 +36,9 @@ spec:
         # Enabling this at wave 0 would fail the sync and BLOCK every later
         # wave. Flip both to true after the stack is green, then commit.
         metrics:
-          enabled: false
+          enabled: true
         serviceMonitor:
-          enabled: false
+          enabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
