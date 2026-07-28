@@ -4,6 +4,15 @@
 # but the NodePorts are pinned to 30080/30443 -- which kind maps to host
 # :80/:443 in kind-cluster.yaml. Both paths work.
 #
+# externalTrafficPolicy MUST be Cluster here. Envoy Gateway defaults it to
+# Local to preserve client source IPs, but under Local kube-proxy only answers
+# on the NodePort of nodes actually running an Envoy pod. With replicas: 1 and
+# extraPortMappings on the control-plane, host :80 lands on a node with no
+# local endpoint and the packets are DROPPED -- which presents as curl
+# connecting successfully and then hanging until timeout, not as a refusal.
+# Cluster lets any node forward to the pod. You lose source-IP preservation,
+# which is meaningless on a laptop.
+#
 # VERIFY THE PORT NAMES. Envoy Gateway derives them from the Gateway's
 # listeners (typically `http-80` / `https-443`). Check with:
 #   kubectl -n envoy-gateway-system get svc -l gateway.envoyproxy.io/owning-gateway-name=dev -o yaml
@@ -27,6 +36,7 @@ spec:
           type: StrategicMerge
           value:
             spec:
+              externalTrafficPolicy: Cluster
               ports:
                 - name: http-80
                   port: 80
