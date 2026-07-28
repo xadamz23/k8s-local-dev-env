@@ -1,32 +1,32 @@
-# If the Envoy Gateway chart already created a GatewayClass named `eg`,
-# either delete it or rename this one -- Argo will fight over ownership.
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
-metadata:
-  name: eg
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  controllerName: gateway.envoyproxy.io/gatewayclass-controller
-  parametersRef:
-    group: gateway.envoyproxy.io
-    kind: EnvoyProxy
-    name: dev-proxy-config
-    namespace: envoy-gateway-system
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: dev
-  namespace: envoy-gateway-system
-  annotations:
-    argocd.argoproj.io/sync-wave: "3"
-spec:
-  gatewayClassName: eg
-  listeners:
-    - name: http
-      protocol: HTTP
-      port: 80
-      allowedRoutes:
-        namespaces:
-          from: All
+# # If the Envoy Gateway chart already created a GatewayClass named `eg`,
+# # either delete it or rename this one -- Argo will fight over ownership.
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: GatewayClass
+# metadata:
+#   name: eg
+#   annotations:
+#     argocd.argoproj.io/sync-wave: "2"
+# spec:
+#   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+#   parametersRef:
+#     group: gateway.envoyproxy.io
+#     kind: EnvoyProxy
+#     name: dev-proxy-config
+#     namespace: envoy-gateway-system
+# ---
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: Gateway
+# metadata:
+#   name: dev
+#   namespace: envoy-gateway-system
+#   annotations:
+#     argocd.argoproj.io/sync-wave: "3"
+# spec:
+#   gatewayClassName: eg
+#   listeners:
+#     - name: http
+#       protocol: HTTP
+#       port: 80
+#       allowedRoutes:
+#         namespaces:
+#           from: All
