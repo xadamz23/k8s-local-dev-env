@@ -10,10 +10,9 @@ spec:
   source:
     repoURL: https://charts.jetstack.io
     chart: cert-manager
-    targetRevision: "*"
+    targetRevision: "1.21.0"
     helm:
       values: |
-        # On cert-manager < v1.15 this key was `installCRDs: true`
         crds:
           enabled: true
   destination:
