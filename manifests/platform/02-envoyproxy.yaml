@@ -1,36 +1,36 @@
-# # This is the piece that makes the whole thing reachable from macOS.
-# #
-# # The Service stays type LoadBalancer so MetalLB really does hand it a VIP,
-# # but the NodePorts are pinned to 30080/30443 -- which kind maps to host
-# # :80/:443 in kind-cluster.yaml. Both paths work.
-# #
-# # VERIFY THE PORT NAMES. Envoy Gateway derives them from the Gateway's
-# # listeners (typically `http-80` / `https-443`). Check with:
-# #   kubectl -n envoy-gateway-system get svc -l gateway.envoyproxy.io/owning-gateway-name=dev -o yaml
-# # and fix the names below if they differ, or the patch silently no-ops.
-# apiVersion: gateway.envoyproxy.io/v1alpha1
-# kind: EnvoyProxy
-# metadata:
-#   name: dev-proxy-config
-#   namespace: envoy-gateway-system
-#   annotations:
-#     argocd.argoproj.io/sync-wave: "1"
-# spec:
-#   provider:
-#     type: Kubernetes
-#     kubernetes:
-#       envoyDeployment:
-#         replicas: 1
-#       envoyService:
-#         type: LoadBalancer
-#         patch:
-#           type: StrategicMerge
-#           value:
-#             spec:
-#               ports:
-#                 - name: http-80
-#                   port: 80
-#                   nodePort: 30080
-#                 - name: https-443
-#                   port: 443
-#                   nodePort: 30443
+# This is the piece that makes the whole thing reachable from macOS.
+#
+# The Service stays type LoadBalancer so MetalLB really does hand it a VIP,
+# but the NodePorts are pinned to 30080/30443 -- which kind maps to host
+# :80/:443 in kind-cluster.yaml. Both paths work.
+#
+# VERIFY THE PORT NAMES. Envoy Gateway derives them from the Gateway's
+# listeners (typically `http-80` / `https-443`). Check with:
+#   kubectl -n envoy-gateway-system get svc -l gateway.envoyproxy.io/owning-gateway-name=dev -o yaml
+# and fix the names below if they differ, or the patch silently no-ops.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: dev-proxy-config
+  namespace: envoy-gateway-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: 1
+      envoyService:
+        type: LoadBalancer
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+                - name: http-80
+                  port: 80
+                  nodePort: 30080
+                - name: https-443
+                  port: 443
+                  nodePort: 30443
