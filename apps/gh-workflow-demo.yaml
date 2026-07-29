@@ -1,0 +1,29 @@
+# Raw manifests that depend on the CRDs installed in wave 0:
+# MetalLB pool, cert-manager issuers, GatewayClass/Gateway, HTTPRoutes.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gh-workflow-demo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/xadamz23/k8s-local-dev-env.git   # <-- change me
+    targetRevision: main
+    path: manifests/gh-workflow-demo
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: demo
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      # Webhooks in wave 0 take a moment to become ready; retry rather
+      # than staring at a failed sync.
+      limit: 8
+      backoff: {duration: 10s, factor: 2, maxDuration: 3m}
