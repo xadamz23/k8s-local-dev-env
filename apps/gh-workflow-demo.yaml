@@ -10,7 +10,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/xadamz23/k8s-local-dev-env.git   # <-- change me
+    repoURL: https://github.com/xadamz23/k8s-local-dev-env.git
     targetRevision: main
     path: manifests/gh-workflow-demo
     directory:
