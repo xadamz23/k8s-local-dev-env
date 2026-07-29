@@ -34,3 +34,14 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+  # I added another job to demonstrate how to run multiple jobs in a workflow
+  shebang:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run a script in the shebang job
+        run: |
+          echo This is the shebang job!
+          echo You can add more steps here as needed.
