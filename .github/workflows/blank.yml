@@ -46,9 +46,17 @@ jobs:
   #         echo This is the shebang job!
   #         echo You can add more steps here as needed.
 
-  # Builds the FastAPI app's container image to prove the Dockerfile is valid.
+  # Builds the FastAPI app's container image and publishes it to GitHub's
+  # container registry (ghcr.io). Pull requests build but do not publish.
   docker-build:
     runs-on: ubuntu-latest
+
+    # GITHUB_TOKEN is read-only by default. `packages: write` is what lets the
+    # push succeed -- no personal access token needed for our own registry.
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -58,16 +66,55 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build the image
+      # Skipped on pull requests, where we only build and throw away.
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Works out the tags for us. Also lowercases the image name, which the
+      # registry requires but GitHub usernames don't guarantee.
+      - name: Work out image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/gh-workflow-demo
+          # sha-<short> is immutable, so a k8s manifest can pin an exact build.
+          # `latest` only moves on the default branch.
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push the image
         uses: docker/build-push-action@v6
         with:
-          # The Dockerfile does `COPY . /app`, so the context has to be the app
-          # directory -- not the repo root.
+          # The Dockerfile's COPY paths are relative to the app directory, so
+          # the context has to be that directory -- not the repo root.
           context: src/gh-workflow-demo
-          # push: false means build-and-discard. We only care that it builds.
-          push: false
-          tags: gh-workflow-demo:ci
+          # Publish on pushes to main; on pull requests, just prove it builds.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           # Reuse layers from previous runs so `uv sync` doesn't re-download
           # every dependency on each build.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Skip the SLSA provenance attestation. It's a supply-chain feature we
+          # aren't using yet, and it clutters the package page with extra
+          # untagged entries.
+          provenance: false
+
+      # Every push leaves the previously-tagged version behind as an untagged
+      # entry. Storage is free for public packages, so this is just tidiness.
+      - name: Delete untagged image versions
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: gh-workflow-demo
+          package-type: container
+          delete-only-untagged-versions: true
+          min-versions-to-keep: 5
