@@ -21,16 +21,17 @@ spec:
         app: gh-workflow-demo
     spec:
       containers:
-      - image: python:3.14
-        name: python
-        command: ["python", "-m", "http.server", "8080"]
-        resources:
-          limits:
-            cpu: 500m
-            memory: 200Mi
-          requests:
-            cpu: 10m
-            memory: 80Mi
+        - image: ghcr.io/xadamz23/gh-workflow-demo:sha-d0e9802
+          name: gh-workflow-demo
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: 500m
+              memory: 200Mi
+            requests:
+              cpu: 10m
+              memory: 80Mi
 ---
 apiVersion: v1
 kind: Service
@@ -43,5 +44,5 @@ spec:
     app: gh-workflow-demo
   ports:
     - protocol: TCP
-      port: 80
-      targetPort: 8080
+      port: 8000
+      targetPort: 8000
