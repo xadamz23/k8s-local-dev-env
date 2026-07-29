@@ -1,0 +1,279 @@
+# This is a basic workflow to help you get started with Actions
+
+name: ADAM-CI
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # # This workflow contains a single job called "build"
+  # build:
+  #   # The type of runner that the job will run on
+  #   runs-on: ubuntu-latest
+
+  #   # Steps represent a sequence of tasks that will be executed as part of the job
+  #   steps:
+  #     # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+  #     - uses: actions/checkout@v6
+
+  #     # Runs a single command using the runners shell
+  #     - name: Run a one-line script
+  #       run: echo Hello Adam!
+
+  #     # Runs a set of commands using the runners shell
+  #     - name: Run a multi-line script
+  #       run: |
+  #         echo Add other actions to build,
+  #         echo test, and deploy your project.
+  # # I added another job to demonstrate how to run multiple jobs in a workflow
+  # shebang:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v6
+
+  #     - name: Run a script in the shebang job
+  #       run: |
+  #         echo This is the shebang job!
+  #         echo You can add more steps here as needed.
+
+  # Builds the FastAPI app's container image and publishes it to GitHub's
+  # container registry (ghcr.io). Pull requests build but do not publish.
+  docker-build:
+    runs-on: ubuntu-latest
+
+    # GITHUB_TOKEN is read-only by default. `packages: write` is what lets the
+    # push succeed -- no personal access token needed for our own registry.
+    permissions:
+      contents: read
+      packages: write
+
+    # Job outputs are the only way to hand a value to a later job -- the
+    # `steps.*` context does not cross job boundaries.
+    outputs:
+      image-ref: ${{ steps.image.outputs.ref }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # Sets up Buildx, Docker's extended builder. Needed for the GitHub
+      # Actions cache backend (type=gha) used below.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Skipped on pull requests, where we only build and throw away.
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Works out the tags for us. Also lowercases the image name, which the
+      # registry requires but GitHub usernames don't guarantee.
+      - name: Work out image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/gh-workflow-demo
+          # sha-<short> is immutable, so a k8s manifest can pin an exact build.
+          # `latest` only moves on the default branch.
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          # The Dockerfile's COPY paths are relative to the app directory, so
+          # the context has to be that directory -- not the repo root.
+          context: src/gh-workflow-demo
+          # Publish on pushes to main; on pull requests, just prove it builds.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Reuse layers from previous runs so `uv sync` doesn't re-download
+          # every dependency on each build.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Skip the SLSA provenance attestation. It's a supply-chain feature we
+          # aren't using yet, and it clutters the package page with extra
+          # untagged entries.
+          provenance: false
+
+      # Picks the immutable sha- tag out of the two we just pushed, so the
+      # manifest-bump job never has to re-derive the tagging convention.
+      #
+      # Deliberately NOT steps.meta.outputs.version: that is the highest
+      # PRIORITY tag, and type=raw (default 200) outranks type=sha (default
+      # 100) -- so on main it resolves to `latest`, the one tag we must never
+      # pin a manifest to.
+      #
+      # outputs.tags is newline-separated, so it is read from the environment
+      # rather than spliced into the script body -- an inline expression would
+      # expand into two shell statements.
+      - name: Expose the immutable image reference
+        id: image
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # `|| true` so the explicit check below reports the problem, rather
+          # than grep's bare exit 1 failing the step with no diagnostic.
+          ref="$(printf '%s\n' "$TAGS" | grep ':sha-' | head -n1 || true)"
+          if [ -z "$ref" ]; then
+            echo "::error::no sha- tag in metadata-action output. Tags were:"
+            printf '%s\n' "$TAGS"
+            exit 1
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "Immutable reference: ${ref}"
+
+      # Every push leaves the previously-tagged version behind as an untagged
+      # entry. Storage is free for public packages, so this is just tidiness.
+      - name: Delete untagged image versions
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: gh-workflow-demo
+          package-type: container
+          delete-only-untagged-versions: true
+          min-versions-to-keep: 5
+
+  # Writes the tag we just published back into the k8s manifest, so git -- not
+  # the registry -- stays the record of what should be deployed. This job never
+  # touches the cluster: its only privilege is writing to git.
+  update-manifest:
+    # Both an ordering constraint AND a success gate: if docker-build fails we
+    # never pin a tag that was never published.
+    needs: docker-build
+    runs-on: ubuntu-latest
+
+    # Matches docker-build's own publish condition (`!= 'pull_request'`) so the
+    # two can't disagree -- if an image was pushed, the manifest gets pinned.
+    # A PR builds without pushing, so there'd be nothing to pin, and it must
+    # never commit to main. The ref check stops a push to some other branch
+    # from bumping main.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+
+    # Job-level permissions REPLACE the workflow-level block rather than
+    # merging, so granting write here leaves docker-build's `contents: read`
+    # intact. This job needs no `packages` scope at all -- it never touches
+    # the registry.
+    permissions:
+      contents: write
+
+    # Serialises only the git-writing job, so image builds still run in
+    # parallel. cancel-in-progress is deliberately false: killing a bump
+    # mid-flight would leave the manifest pinned to an older image than the
+    # one that was just built.
+    concurrency:
+      group: update-manifest-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      # `ref: main` checks out the BRANCH, not the pushed commit -- a detached
+      # HEAD at github.sha has nothing to commit onto and push. fetch-depth: 0
+      # because the rebase retry below needs real history; the default shallow
+      # clone of one commit cannot rebase. persist-credentials defaults to
+      # true, which leaves GITHUB_TOKEN in .git/config -- that, and nothing
+      # else, is what makes the final `git push` work without a PAT.
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # yq parses the YAML instead of pattern-matching text, so the container is
+      # addressed structurally and can't rewrite some future sidecar's image.
+      # yq v4 ships preinstalled on ubuntu-latest, so there's no install step.
+      #
+      # full.yaml is a THREE-document file (Namespace / Deployment / Service).
+      # `with(path; update)` scopes the mutation to the matched node and returns
+      # the whole document stream, so all three survive and the `---`
+      # separators are preserved.
+      #
+      # The value arrives via the environment and strenv() keeps it a string,
+      # so a tag is never interpreted as part of the expression.
+      - name: Pin the new image in the manifest
+        env:
+          IMAGE_REF: ${{ needs.docker-build.outputs.image-ref }}
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_REF"
+
+          yq -i '
+            with(
+              select(.kind == "Deployment").spec.template.spec.containers[]
+                | select(.name == "gh-workflow-demo");
+              .image = strenv(IMAGE_REF)
+            )
+          ' manifests/gh-workflow-demo/full.yaml
+
+          # yq exits 0 whether or not the selector matched, and a silent
+          # no-match is indistinguishable from "already up to date". Assert the
+          # value actually landed rather than trusting the exit code -- a
+          # renamed container would otherwise stay green forever.
+          grep -qF "image: ${IMAGE_REF}" manifests/gh-workflow-demo/full.yaml || {
+            echo "::error::manifest not updated to ${IMAGE_REF} -- did the container name change?"
+            exit 1
+          }
+
+          git --no-pager diff -- manifests/gh-workflow-demo/full.yaml
+
+      - name: Commit and push the bump
+        env:
+          IMAGE_REF: ${{ needs.docker-build.outputs.image-ref }}
+        run: |
+          set -euo pipefail
+
+          # The no-op case: re-running on an already-pinned commit produces a
+          # byte-identical manifest, and `git commit` on an empty index exits
+          # non-zero -- which would fail the job for no reason.
+          if git diff --quiet -- manifests/gh-workflow-demo/full.yaml; then
+            echo "Manifest already pins ${IMAGE_REF} -- nothing to commit."
+            exit 0
+          fi
+
+          # The canonical bot identity, so the commit renders with the Actions
+          # avatar. Purely cosmetic: it is the TOKEN, not the author, that
+          # decides whether a push retriggers CI.
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add manifests/gh-workflow-demo/full.yaml
+
+          # [skip ci] is belt-and-braces, not the primary loop guard: commits
+          # pushed with the default GITHUB_TOKEN do not create workflow runs at
+          # all, so this cannot retrigger itself today. The marker is what keeps
+          # that true if the token is ever swapped for a PAT or GitHub App
+          # token, and it labels the commit as machine-generated in git log.
+          git commit -m "ci: pin gh-workflow-demo to ${IMAGE_REF##*:} [skip ci]"
+
+          # `concurrency` only serialises runs of THIS workflow -- it cannot
+          # stop a human pushing to main between our checkout and our push,
+          # which git rejects as non-fast-forward. Rebase our one commit on top
+          # and retry. Never force-push: that would discard their work.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected; rebasing onto origin/main (attempt ${attempt})."
+            git pull --rebase --autostash origin main
+          done
+
+          echo "::error::could not push the manifest bump after 3 attempts"
+          exit 1
