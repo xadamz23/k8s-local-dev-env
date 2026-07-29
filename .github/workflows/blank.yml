@@ -45,3 +45,29 @@ jobs:
         run: |
           echo This is the shebang job!
           echo You can add more steps here as needed.
+
+  # Builds the FastAPI app's container image to prove the Dockerfile is valid.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # Sets up Buildx, Docker's extended builder. Needed for the GitHub
+      # Actions cache backend (type=gha) used below.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          # The Dockerfile does `COPY . /app`, so the context has to be the app
+          # directory -- not the repo root.
+          context: src/gh-workflow-demo
+          # push: false means build-and-discard. We only care that it builds.
+          push: false
+          tags: gh-workflow-demo:ci
+          # Reuse layers from previous runs so `uv sync` doesn't re-download
+          # every dependency on each build.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
