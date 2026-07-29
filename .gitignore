@@ -1,4 +1,7 @@
 **/.DS_Store
+**/__pycache__
+**/.env
+**/.venv
 
 # Corporate CA material. Not secret, but it names your employer and
 # enumerates their security tooling -- keep it out of the repo.

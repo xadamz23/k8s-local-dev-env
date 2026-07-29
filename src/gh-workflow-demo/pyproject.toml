@@ -1,0 +1,8 @@
+[project]
+name = "gh-workflow-demo"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]>=0.141.0",
+    "uvicorn>=0.52.0",
+]
