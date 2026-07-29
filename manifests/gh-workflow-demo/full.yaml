@@ -21,7 +21,7 @@ spec:
         app: gh-workflow-demo
     spec:
       containers:
-        - image: ghcr.io/xadamz23/gh-workflow-demo:sha-a087d89
+        - image: ghcr.io/xadamz23/gh-workflow-demo:sha-470c201
           name: gh-workflow-demo
           ports:
             - containerPort: 8000
