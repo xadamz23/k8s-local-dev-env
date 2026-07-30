@@ -5,12 +5,27 @@ name: ADAM-CI
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push or pull request events but only for the "main" branch
+  #
+  # The `paths` filters are what make the bump PR converge, and they are NOT
+  # optional. Merging a bump PR is a real push to main (unlike the bot's own
+  # commits, which GITHUB_TOKEN suppresses). Because type=sha follows the commit
+  # sha, that merge would build a brand-new image, open another bump PR, and
+  # repeat forever -- one PR per merge, never settling. Restricting builds to
+  # changes that can actually alter the image breaks the cycle: a merge that
+  # only touches manifests/ no longer triggers anything.
   push:
     branches: [ "main" ]
+    paths:
+      - 'src/gh-workflow-demo/**'
+      - '.github/workflows/do-it.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'src/gh-workflow-demo/**'
+      - '.github/workflows/do-it.yml'
 
-  # Allows you to run this workflow manually from the Actions tab
+  # Allows you to run this workflow manually from the Actions tab. Deliberately
+  # unfiltered, so you can always force a build regardless of what changed.
   workflow_dispatch:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
@@ -152,9 +167,10 @@ jobs:
           delete-only-untagged-versions: true
           min-versions-to-keep: 5
 
-  # Writes the tag we just published back into the k8s manifest, so git -- not
-  # the registry -- stays the record of what should be deployed. This job never
-  # touches the cluster: its only privilege is writing to git.
+  # Opens (or rolls forward) a pull request that pins the tag we just published
+  # into the k8s manifest, so git -- not the registry -- stays the record of what
+  # should be deployed, and a human approves each deploy. This job never touches
+  # the cluster: its only privilege is writing to git.
   update-manifest:
     # Both an ordering constraint AND a success gate: if docker-build fails we
     # never pin a tag that was never published.
@@ -172,29 +188,34 @@ jobs:
     # merging, so granting write here leaves docker-build's `contents: read`
     # intact. This job needs no `packages` scope at all -- it never touches
     # the registry.
+    #
+    # `contents: write` pushes the bump branch; `pull-requests: write` opens the
+    # PR. Both are also gated on a repo setting: Settings -> Actions -> General
+    # -> Workflow permissions -> "Allow GitHub Actions to create and approve
+    # pull requests". Without it the PR step fails with a 403 that does not
+    # mention the setting.
     permissions:
       contents: write
+      pull-requests: write
 
-    # Serialises only the git-writing job, so image builds still run in
-    # parallel. cancel-in-progress is deliberately false: killing a bump
-    # mid-flight would leave the manifest pinned to an older image than the
-    # one that was just built.
+    # Two runs racing to force-update the same `ci/image-bump` branch would
+    # interleave, and the PR could end up showing the older of the two images.
+    # Serialise just this job so image builds still run in parallel.
+    # cancel-in-progress is deliberately false: killing a bump mid-flight could
+    # leave the branch half-updated.
     concurrency:
       group: update-manifest-${{ github.ref }}
       cancel-in-progress: false
 
     steps:
-      # `ref: main` checks out the BRANCH, not the pushed commit -- a detached
-      # HEAD at github.sha has nothing to commit onto and push. fetch-depth: 0
-      # because the rebase retry below needs real history; the default shallow
-      # clone of one commit cannot rebase. persist-credentials defaults to
-      # true, which leaves GITHUB_TOKEN in .git/config -- that, and nothing
-      # else, is what makes the final `git push` work without a PAT.
+      # `ref: main` checks out the BRANCH rather than the pushed commit, so the
+      # bump branch forks from the current tip of main and the PR diff contains
+      # only our one line. No fetch-depth needed now that nothing rebases -- the
+      # bump lives on its own branch and cannot collide with main.
       - name: Check out main
         uses: actions/checkout@v6
         with:
           ref: main
-          fetch-depth: 0
 
       # yq parses the YAML instead of pattern-matching text, so the container is
       # addressed structurally and can't rewrite some future sidecar's image.
@@ -233,47 +254,66 @@ jobs:
 
           git --no-pager diff -- manifests/gh-workflow-demo/full.yaml
 
-      - name: Commit and push the bump
+      # This action does the fiddly parts of the PR dance: it notices an empty
+      # diff and exits without opening anything (so a re-run is a clean no-op,
+      # which is why the explicit `git diff --quiet` guard is gone), creates the
+      # branch or force-updates it if it already exists, and creates the PR or
+      # updates the one that is already open.
+      #
+      # `branch` is a FIXED name, not per-sha, and that is deliberate: every
+      # build rolls the same PR forward, so you get one standing "deploy this
+      # image" PR showing the newest tag rather than a pile of stale ones.
+      #
+      # Note it commits with GITHUB_TOKEN, so the branch push does not trigger
+      # CI. Merging the PR *is* a real push to main though -- which is exactly
+      # what the `paths` filters at the top of this file are guarding against.
+      - name: Open or roll forward the bump PR
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          base: main
+          branch: ci/image-bump
+          # Tidies the branch up once the PR is merged or closed.
+          delete-branch: true
+          add-paths: manifests/gh-workflow-demo/full.yaml
+          # No [skip ci] any more: the paths filter is the real loop guard now,
+          # and if you later swap in a PAT to get checks on this PR, you want
+          # them to actually run.
+          commit-message: "ci: pin gh-workflow-demo to ${{ needs.docker-build.outputs.image-ref }}"
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          title: "Deploy gh-workflow-demo ${{ needs.docker-build.outputs.image-ref }}"
+          body: |
+            Pins `manifests/gh-workflow-demo/full.yaml` to the image built from
+            ${{ github.sha }}.
+
+            **Image:** `${{ needs.docker-build.outputs.image-ref }}`
+            **Built by:** [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            Merging this is the deploy: Argo CD reconciles `main`, so the new tag
+            goes live on its next poll.
+
+            > Opened automatically by ADAM-CI. This branch is rolled forward in
+            > place, so the diff always reflects the most recent build.
+
+      # A short summary in the run log, so you can see what happened without
+      # opening the PR -- and so a skipped no-op is visible rather than silent.
+      - name: Summarise
         env:
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+          PR_OP: ${{ steps.pr.outputs.pull-request-operation }}
           IMAGE_REF: ${{ needs.docker-build.outputs.image-ref }}
         run: |
           set -euo pipefail
-
-          # The no-op case: re-running on an already-pinned commit produces a
-          # byte-identical manifest, and `git commit` on an empty index exits
-          # non-zero -- which would fail the job for no reason.
-          if git diff --quiet -- manifests/gh-workflow-demo/full.yaml; then
-            echo "Manifest already pins ${IMAGE_REF} -- nothing to commit."
+          if [ -z "$PR_NUMBER" ]; then
+            echo "Manifest already pins ${IMAGE_REF} -- no PR needed."
             exit 0
           fi
-
-          # The canonical bot identity, so the commit renders with the Actions
-          # avatar. Purely cosmetic: it is the TOKEN, not the author, that
-          # decides whether a push retriggers CI.
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add manifests/gh-workflow-demo/full.yaml
-
-          # [skip ci] is belt-and-braces, not the primary loop guard: commits
-          # pushed with the default GITHUB_TOKEN do not create workflow runs at
-          # all, so this cannot retrigger itself today. The marker is what keeps
-          # that true if the token is ever swapped for a PAT or GitHub App
-          # token, and it labels the commit as machine-generated in git log.
-          git commit -m "ci: pin gh-workflow-demo to ${IMAGE_REF##*:} [skip ci]"
-
-          # `concurrency` only serialises runs of THIS workflow -- it cannot
-          # stop a human pushing to main between our checkout and our push,
-          # which git rejects as non-fast-forward. Rebase our one commit on top
-          # and retry. Never force-push: that would discard their work.
-          for attempt in 1 2 3; do
-            if git push origin HEAD:main; then
-              echo "Pushed on attempt ${attempt}."
-              exit 0
-            fi
-            echo "Push rejected; rebasing onto origin/main (attempt ${attempt})."
-            git pull --rebase --autostash origin main
-          done
-
-          echo "::error::could not push the manifest bump after 3 attempts"
-          exit 1
+          echo "PR #${PR_NUMBER} (${PR_OP}): ${PR_URL}"
+          {
+            echo "### Deploy PR ready"
+            echo ""
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- PR: [#${PR_NUMBER}](${PR_URL}) (${PR_OP})"
+          } >> "$GITHUB_STEP_SUMMARY"
