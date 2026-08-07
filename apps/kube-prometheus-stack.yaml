@@ -52,6 +52,8 @@ spec:
             resources:
               requests: {cpu: 200m, memory: 1Gi}
               limits: {memory: 2Gi}
+            externalLabels:
+              cluster: kind-local
             storageSpec:
               volumeClaimTemplate:
                 spec:
@@ -59,6 +61,14 @@ spec:
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests: {storage: 10Gi}
+
+        prometheus-node-exporter:
+          prometheus:
+            monitor:
+              relabelings:
+                - sourceLabels: [__meta_kubernetes_pod_node_name]
+                  targetLabel: instance
+                  action: replace          # instance becomes kind-worker, not 172.18.0.3:9100
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
