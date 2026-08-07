@@ -42,29 +42,33 @@ spec:
         kubelet:
           serviceMonitor:
             relabelings:
-              - sourceLabels: [__metrics_path__]
+              - action: replace
+                sourceLabels: [__metrics_path__]
                 targetLabel: metrics_path
-              - targetLabel: cluster
+              - action: replace
                 replacement: kind-local
-                action: replace
+                targetLabel: cluster
             cAdvisorRelabelings:
-              - sourceLabels: [__metrics_path__]
+              - action: replace
+                sourceLabels: [__metrics_path__]
                 targetLabel: metrics_path
-              - targetLabel: cluster
+              - action: replace
                 replacement: kind-local
-                action: replace
+                targetLabel: cluster
             probesRelabelings:
-              - sourceLabels: [__metrics_path__]
+              - action: replace
+                sourceLabels: [__metrics_path__]
                 targetLabel: metrics_path
-              - targetLabel: cluster
+              - action: replace
                 replacement: kind-local
-                action: replace
+                targetLabel: cluster
             resourceRelabelings:
-              - sourceLabels: [__metrics_path__]
+              - action: replace
+                sourceLabels: [__metrics_path__]
                 targetLabel: metrics_path
-              - targetLabel: cluster
+              - action: replace
                 replacement: kind-local
-                action: replace
+                targetLabel: cluster
 
         grafana:
           adminPassword: admin
