@@ -39,6 +39,33 @@ spec:
         kubeProxy:
           enabled: true
 
+        kubelet:
+          serviceMonitor:
+            relabelings:
+              - sourceLabels: [__metrics_path__]
+                targetLabel: metrics_path
+              - targetLabel: cluster
+                replacement: kind-local
+                action: replace
+            cAdvisorRelabelings:
+              - sourceLabels: [__metrics_path__]
+                targetLabel: metrics_path
+              - targetLabel: cluster
+                replacement: kind-local
+                action: replace
+            probesRelabelings:
+              - sourceLabels: [__metrics_path__]
+                targetLabel: metrics_path
+              - targetLabel: cluster
+                replacement: kind-local
+                action: replace
+            resourceRelabelings:
+              - sourceLabels: [__metrics_path__]
+                targetLabel: metrics_path
+              - targetLabel: cluster
+                replacement: kind-local
+                action: replace
+
         grafana:
           adminPassword: admin
           # Reached via the HTTPRoute in manifests/platform/httproutes.yaml
